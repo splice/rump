@@ -1,10 +1,12 @@
 package main
 
 import (
-	"os"
-	"fmt"
 	"flag"
-	"github.com/garyburd/redigo/redis"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/gomodule/redigo/redis"
 )
 
 // Report all errors to stdout.
@@ -18,19 +20,26 @@ func handle(err error) {
 // Scan and queue source keys.
 func get(conn redis.Conn, queue chan<- map[string]string) {
 	var (
-		cursor int64
+		// cursor int64
 		keys []string
 	)
 
-	for {
-		// Scan a batch of keys.
-		values, err := redis.Values(conn.Do("SCAN", cursor))
-		handle(err)
-		values, err = redis.Scan(values, &cursor, &keys)
-		handle(err)
+	start := time.Now()
+	fmt.Printf("Fetching keys: %s\n", start.String())
+	keys, err := redis.Strings(conn.Do("KEYS", "*"))
+	handle(err)
+	fmt.Printf("Took: %s\n", time.Now().Sub(start))
+	fmt.Printf("Total Keys: %d\n", len(keys))
+
+	batchSize := 10
+	for i := 0; i < len(keys); i += batchSize {
+		last := i + batchSize
+		if last > len(keys) {
+			last = len(keys)
+		}
 
 		// Get pipelined dumps.
-		for _, key := range keys {
+		for _, key := range keys[i:last] {
 			conn.Send("DUMP", key)
 		}
 		dumps, err := redis.Strings(conn.Do(""))
@@ -38,27 +47,55 @@ func get(conn redis.Conn, queue chan<- map[string]string) {
 
 		// Build batch map.
 		batch := make(map[string]string)
-		for i, _ := range keys {
-			batch[keys[i]] = dumps[i]
-		}
-
-		// Last iteration of scan.
-		if cursor == 0 {
-			// queue last batch.
-			select {
-			case queue <- batch:
-			}
-			close(queue)
-			break
+		for j, key := range keys[i:last] {
+			batch[key] = dumps[j]
 		}
 
 		fmt.Printf(">")
-		// queue current batch.
 		queue <- batch
 	}
+
+	close(queue)
+	fmt.Printf("Total Time: %s\n", time.Now().Sub(start))
+
+	// for {
+	// 	// Scan a batch of keys.
+	// 	values, err := redis.Values(conn.Do("SCAN", cursor))
+	// 	handle(err)
+	// 	values, err = redis.Scan(values, &cursor, &keys)
+	// 	handle(err)
+
+	// 	// Get pipelined dumps.
+	// 	for _, key := range keys {
+	// 		conn.Send("DUMP", key)
+	// 	}
+	// 	dumps, err := redis.Strings(conn.Do(""))
+	// 	handle(err)
+
+	// 	// Build batch map.
+	// 	batch := make(map[string]string)
+	// 	for i := range keys {
+	// 		batch[keys[i]] = dumps[i]
+	// 	}
+
+	// 	// Last iteration of scan.
+	// 	if cursor == 0 {
+	// 		// queue last batch.
+	// 		select {
+	// 		case queue <- batch:
+	// 		}
+	// 		close(queue)
+	// 		break
+	// 	}
+
+	// 	fmt.Printf(">")
+	// 	// queue current batch.
+	// 	queue <- batch
+	// }
 }
 
 // Restore a batch of keys on destination.
+// func put(conn redis.Conn, queue <-chan map[string]string) {
 func put(conn redis.Conn, queue <-chan map[string]string) {
 	for batch := range queue {
 		for key, value := range batch {
@@ -87,6 +124,7 @@ func main() {
 	queue := make(chan map[string]string, 100)
 
 	// Scan and send to queue.
+	// go get(source, queue)
 	go get(source, queue)
 
 	// Restore keys as they come into queue.
