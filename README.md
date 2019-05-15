@@ -4,6 +4,8 @@
 
 Hot sync two Redis databases using dumps.
 
+**NOTE:** This is a fork of the official repo for Splice. You can find instructions in [`SPLICE_README.md`](./SPLICE_README.md)
+
 ## Why
 
 There's no easy way to get/sync data from an [AWS ElastiCache]( http://docs.aws.amazon.com/AmazonElastiCache/latest/UserGuide/ClientConfig.RestrictedCommands.html ) Redis cluster.
