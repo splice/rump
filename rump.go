@@ -30,7 +30,7 @@ func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string)
 	allKeys, err := redis.Strings(conn.Do("KEYS", "*"))
 	handle(err)
 	fmt.Printf("Took: %s\n", time.Now().Sub(start))
-	fmt.Printf("Total Keys: %d\n", len(keys))
+	fmt.Printf("Total Keys: %d\n", len(allKeys))
 
 	// Only copy what is no longer in the new cluster.
 	for _, key := range allKeys {
@@ -38,6 +38,7 @@ func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string)
 			keys = append(keys, key)
 		}
 	}
+	fmt.Printf("Total Keys to sync: %d\n", len(keys))
 
 	batchSize := 10
 	for i := 0; i < len(keys); i += batchSize {
@@ -48,6 +49,7 @@ func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string)
 
 		// Get pipelined dumps.
 		for _, key := range keys[i:last] {
+			fmt.Println(key)
 			conn.Send("DUMP", key)
 		}
 		dumps, err := redis.Strings(conn.Do(""))
@@ -59,7 +61,7 @@ func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string)
 			batch[key] = dumps[j]
 		}
 
-		fmt.Printf(">")
+		// fmt.Printf(">")
 		queue <- batch
 	}
 
@@ -112,7 +114,7 @@ func put(conn redis.Conn, queue <-chan map[string]string) {
 		_, err := conn.Do("")
 		handle(err)
 
-		fmt.Printf(".")
+		// fmt.Printf(".")
 	}
 }
 
@@ -135,7 +137,10 @@ func main() {
 	// a "set" of strings.
 	keys, err := redis.Strings(destination.Do("KEYS", "*"))
 	handle(err)
-	found := map[string]bool{}
+	found := map[string]bool{
+		"prerender_noindex_helper:completed_queue": true,
+		"prerender_noindex_helper:seen_queue":      true,
+	}
 	for _, key := range keys {
 		found[key] = true
 	}

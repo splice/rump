@@ -7,7 +7,7 @@ build:
 	mkdir -p build
 	env GOOS=linux GOARCH=amd64 go build -o build/rump
 
-build_container:
+build_container: build
 	docker rmi -f rump:$(VERSION) >/dev/null 2>&1 || true
 	docker build -t rump:$(VERSION) -f Dockerfile .
 
@@ -15,7 +15,7 @@ clean_build_container:
 	docker rmi -f rump:$(VERSION) >/dev/null 2>&1 || true
 	docker build --no-cache -t rump:$(VERSION) -f Dockerfile .
 
-upload:
+upload: build_container
 	$(eval CONTAINER_ID := $(shell docker image ls rump | grep '$(VERSION)' | awk '{print $$3}'))
 	docker tag $(CONTAINER_ID) $(REPO_URL):$(VERSION)
 	docker push $(REPO_URL):$(VERSION)
