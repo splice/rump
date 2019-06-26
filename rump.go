@@ -18,18 +18,27 @@ func handle(err error) {
 }
 
 // Scan and queue source keys.
-func get(conn redis.Conn, queue chan<- map[string]string) {
+func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string) {
 	var (
 		// cursor int64
-		keys []string
+		keys    []string
+		allKeys []string
 	)
 
 	start := time.Now()
 	fmt.Printf("Fetching keys: %s\n", start.String())
-	keys, err := redis.Strings(conn.Do("KEYS", "*"))
+	allKeys, err := redis.Strings(conn.Do("KEYS", "*"))
 	handle(err)
 	fmt.Printf("Took: %s\n", time.Now().Sub(start))
-	fmt.Printf("Total Keys: %d\n", len(keys))
+	fmt.Printf("Total Keys: %d\n", len(allKeys))
+
+	// Only copy what is no longer in the new cluster.
+	for _, key := range allKeys {
+		if !found[key] {
+			keys = append(keys, key)
+		}
+	}
+	fmt.Printf("Total Keys to sync: %d\n", len(keys))
 
 	batchSize := 10
 	for i := 0; i < len(keys); i += batchSize {
@@ -40,6 +49,7 @@ func get(conn redis.Conn, queue chan<- map[string]string) {
 
 		// Get pipelined dumps.
 		for _, key := range keys[i:last] {
+			fmt.Println(key)
 			conn.Send("DUMP", key)
 		}
 		dumps, err := redis.Strings(conn.Do(""))
@@ -51,7 +61,7 @@ func get(conn redis.Conn, queue chan<- map[string]string) {
 			batch[key] = dumps[j]
 		}
 
-		fmt.Printf(">")
+		// fmt.Printf(">")
 		queue <- batch
 	}
 
@@ -104,7 +114,7 @@ func put(conn redis.Conn, queue <-chan map[string]string) {
 		_, err := conn.Do("")
 		handle(err)
 
-		fmt.Printf(".")
+		// fmt.Printf(".")
 	}
 }
 
@@ -123,9 +133,21 @@ func main() {
 	// Channel where batches of keys will pass.
 	queue := make(chan map[string]string, 100)
 
+	// Get the keys from the `destination` cluster and make them
+	// a "set" of strings.
+	keys, err := redis.Strings(destination.Do("KEYS", "*"))
+	handle(err)
+	found := map[string]bool{
+		"prerender_noindex_helper:completed_queue": true,
+		"prerender_noindex_helper:seen_queue":      true,
+	}
+	for _, key := range keys {
+		found[key] = true
+	}
+
 	// Scan and send to queue.
 	// go get(source, queue)
-	go get(source, queue)
+	go get(source, found, queue)
 
 	// Restore keys as they come into queue.
 	put(destination, queue)
