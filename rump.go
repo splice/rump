@@ -18,18 +18,26 @@ func handle(err error) {
 }
 
 // Scan and queue source keys.
-func get(conn redis.Conn, queue chan<- map[string]string) {
+func get(conn redis.Conn, found map[string]bool, queue chan<- map[string]string) {
 	var (
 		// cursor int64
-		keys []string
+		keys    []string
+		allKeys []string
 	)
 
 	start := time.Now()
 	fmt.Printf("Fetching keys: %s\n", start.String())
-	keys, err := redis.Strings(conn.Do("KEYS", "*"))
+	allKeys, err := redis.Strings(conn.Do("KEYS", "*"))
 	handle(err)
 	fmt.Printf("Took: %s\n", time.Now().Sub(start))
 	fmt.Printf("Total Keys: %d\n", len(keys))
+
+	// Only copy what is no longer in the new cluster.
+	for _, key := range allKeys {
+		if !found[key] {
+			keys = append(keys, key)
+		}
+	}
 
 	batchSize := 10
 	for i := 0; i < len(keys); i += batchSize {
@@ -123,9 +131,18 @@ func main() {
 	// Channel where batches of keys will pass.
 	queue := make(chan map[string]string, 100)
 
+	// Get the keys from the `destination` cluster and make them
+	// a "set" of strings.
+	keys, err := redis.Strings(destination.Do("KEYS", "*"))
+	handle(err)
+	found := map[string]bool{}
+	for _, key := range keys {
+		found[key] = true
+	}
+
 	// Scan and send to queue.
 	// go get(source, queue)
-	go get(source, queue)
+	go get(source, found, queue)
 
 	// Restore keys as they come into queue.
 	put(destination, queue)
